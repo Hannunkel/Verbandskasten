@@ -2,6 +2,7 @@
 
 Web-App zum Prüfen von Verbandskästen: Inhalt zählen, Haltbarkeitsdaten erfassen, Fehlmengen automatisch als Bestell-E-Mail erzeugen. Läuft als installierbare PWA vom Home-Bildschirm, offline, ohne Server und ohne Build-Schritt.
 
+
 ## Auf GitHub Pages veröffentlichen
 
 1. Neues Repository anlegen, z. B. `verbandskasten`. Sichtbarkeit **Public** (bei privaten Repos braucht Pages einen kostenpflichtigen Plan).
