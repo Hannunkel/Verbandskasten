@@ -98,6 +98,12 @@ button{cursor:pointer;border:none;background:none}
 .btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .btnrow{display:flex;gap:10px}
 
+/* ---------- Gebäudekachel ---------- */
+.gebtile{width:64px;height:64px;border-radius:16px;flex:none;display:grid;place-items:center;
+  border:2px solid var(--line);background:var(--line-2);line-height:1}
+.gebtile b{font-family:var(--disp);font-size:32px;font-weight:700;display:block;text-align:center}
+.gebtile span{font-family:var(--disp);font-size:10px;letter-spacing:.1em;text-transform:uppercase;display:block;text-align:center;margin-top:1px}
+
 /* ---------- Suche ---------- */
 .search{position:relative;margin-bottom:4px}
 .search input{width:100%;padding:13px 42px 13px 42px;border:1px solid var(--line);border-radius:12px;background:var(--card);font-size:16px;-webkit-appearance:none;appearance:none}
@@ -205,7 +211,10 @@ dialog::backdrop{background:rgba(12,34,27,.45)}
 
 <main>
   <!-- ÜBERSICHT -->
-  <section id="view-boxes" class="view active"><div class="wrap" id="boxesWrap"></div></section>
+  <!-- GEBÄUDE -->
+  <section id="view-gebs" class="view active"><div class="wrap" id="gebsWrap"></div></section>
+  <!-- EINRICHTUNGEN IM GEBÄUDE -->
+  <section id="view-boxes" class="view"><div class="wrap" id="boxesWrap"></div></section>
   <!-- KASTEN PRÜFEN -->
   <section id="view-box" class="view"><div class="wrap" id="boxWrap"></div></section>
   <!-- BESTELLUNG -->
@@ -325,7 +334,7 @@ const STANDORTE = [
 /* ---- State ---- */
 const DEF = { v:1, settings:{ email:EMAIL_DEFAULT, pruefer:"", warn:3, interval:12 }, boxes:[] };
 let state = load();
-let view = "boxes", curBox = null, filter = "alle", orderScope = null, orderData = [], boxQuery = "";
+let view = "gebs", curBox = null, curGeb = null, filter = "alle", orderScope = {t:"all"}, orderData = [], boxQuery = "", gebQuery = "";
 
 function load(){
   try{
@@ -447,71 +456,172 @@ function plakette(b){
 }
 
 /* =========================================================
-   VIEW 1 — Übersicht
+   VIEW 0 — Gebäude
    ========================================================= */
-function renderBoxes(){
+/** Alle Gebäude in der Reihenfolge, in der sie zuerst auftreten. */
+function gebaeude(){
+  const m = new Map();
+  state.boxes.forEach(b => {
+    const g = b.ort || "Ohne Gebäude";
+    if(!m.has(g)) m.set(g, []);
+    m.get(g).push(b);
+  });
+  return [...m.entries()].map(([name, boxes]) => {
+    let probleme = 0, faellig = 0, offen = 0, bestellen = 0;
+    boxes.forEach(b => {
+      const st = boxStats(b), due = nextCheck(b);
+      if(st.probleme) probleme++;
+      if(!due || new Date(due) < new Date()) faellig++;
+      offen += st.offen; bestellen += st.bestellen;
+    });
+    return { name, boxes, probleme, faellig, offen, bestellen };
+  });
+}
+
+function renderGebs(){
   $("#topEyebrow").textContent = "Erste Hilfe · Prüfung";
-  $("#topTitle").textContent = "Einrichtungen";
+  $("#topTitle").textContent = "Gebäude";
   $("#backBtn").hidden = true;
 
-  const w = $("#boxesWrap");
+  const w = $("#gebsWrap");
   if(!state.boxes.length){
     w.innerHTML = `<div class="empty">
       <svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2M12 11v6M9 14h6"/></svg>
-      <h3>Noch keine Einrichtung angelegt</h3>
+      <h3>Noch nichts angelegt</h3>
       <p>Lade die hinterlegten Standorte oder leg eine einzelne Einrichtung an.</p>
       <button class="btn primary" id="aSeed" style="max-width:280px;margin:18px auto 0">Standorte laden</button>
     </div>`;
-    const sb = $("#aSeed");
-    if(sb) sb.onclick = () => { const n = seedStandorte(); renderBoxes(); toast(`${n} Einrichtungen angelegt`); };
+    $("#aSeed").onclick = () => { const n = seedStandorte(); renderGebs(); toast(`${n} Einrichtungen angelegt`); };
   } else {
-    const gesamt = state.boxes.reduce((n,b)=>n+boxStats(b).bestellen,0);
-    const faellig = state.boxes.filter(b=>{const d=nextCheck(b);return !d||new Date(d)<new Date();}).length;
+    const gs = gebaeude();
+    const bestellen = gs.reduce((n,g)=>n+g.bestellen,0);
+    const faellig = gs.reduce((n,g)=>n+g.faellig,0);
     w.innerHTML = `
       <div class="banner" style="margin-bottom:14px">
         <div style="flex:1">
-          <b>${state.boxes.length} Einrichtungen</b> ·
-          ${faellig?`${faellig} zur Prüfung fällig`:"alle Prüfungen aktuell"}${gesamt?` · ${gesamt} Artikel nachzubestellen`:""}
+          <b>${gs.length} ${gs.length===1?"Gebäude":"Gebäude"} · ${state.boxes.length} Einrichtungen</b><br>
+          ${faellig?`${faellig} zur Prüfung fällig`:"alle Prüfungen aktuell"}${bestellen?` · ${bestellen} Artikel nachzubestellen`:""}
         </div>
       </div>
       <div class="search">
         <svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-        <input id="boxSearch" type="search" inputmode="search" autocomplete="off"
-               placeholder="Standort suchen – z. B. Leitzentrale" value="${esc(boxQuery)}">
-        <button id="boxClear" aria-label="Suche löschen" style="display:${boxQuery?"block":"none"}">×</button>
+        <input id="gebSearch" type="search" inputmode="search" autocomplete="off"
+               placeholder="Alle Standorte durchsuchen" value="${esc(gebQuery)}">
+        <button id="gebClear" aria-label="Suche löschen" style="display:${gebQuery?"block":"none"}">×</button>
       </div>
-      <div id="boxList"></div>
-      <p class="note" style="margin-top:18px">Die Inhalte stammen aus dem WERO-Inhaltsverzeichnis vom 11.08.2026. REF-Nummern und Sollmengen lassen sich je Einrichtung anpassen und werden so in die Bestellung übernommen.</p>`;
-    const inp = $("#boxSearch"), cl = $("#boxClear");
-    inp.oninput = () => { boxQuery = inp.value; cl.style.display = boxQuery ? "block" : "none"; renderBoxList(); };
-    cl.onclick = () => { boxQuery = ""; inp.value = ""; cl.style.display = "none"; inp.focus(); renderBoxList(); };
-    renderBoxList();
+      <div id="gebList"></div>`;
+    const inp = $("#gebSearch"), cl = $("#gebClear");
+    inp.oninput = () => { gebQuery = inp.value; cl.style.display = gebQuery ? "block" : "none"; renderGebList(); };
+    cl.onclick = () => { gebQuery = ""; inp.value = ""; cl.style.display = "none"; inp.focus(); renderGebList(); };
+    renderGebList();
   }
   $("#actionInner").innerHTML = `
     ${state.boxes.length?`<button class="btn ghost" id="aOrderAll">Gesamtbestellung</button>`:""}
     <button class="btn primary" id="aNew"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Neue Einrichtung</button>`;
   $("#aNew").onclick = () => sheetBox();
-  const oa = $("#aOrderAll"); if(oa) oa.onclick = () => openOrder(null);
+  const oa = $("#aOrderAll"); if(oa) oa.onclick = () => openOrder({t:"all"});
+}
+
+/** Ohne Suche: Gebäudekarten. Mit Suche: passende Einrichtungen aus allen Gebäuden. */
+function renderGebList(){
+  const el = $("#gebList"); if(!el) return;
+  const q = gebQuery.trim().toLowerCase();
+
+  if(q){
+    const treffer = state.boxes.filter(b =>
+      [b.name, b.ort, b.art, TEMPLATES[b.norm]?.label].join(" ").toLowerCase().includes(q));
+    el.innerHTML = treffer.length
+      ? `<div class="sectionlabel">${treffer.length} ${treffer.length===1?"Treffer":"Treffer"}</div>`
+        + treffer.map(b => boxCard(b, true)).join("")
+      : `<div class="empty" style="padding:32px 20px"><h3>Nichts gefunden</h3>
+         <p>Suche nach Standort, Gebäude oder Art der Einrichtung.</p></div>`;
+    el.querySelectorAll("[data-open]").forEach(x => x.onclick = () => openBox(x.dataset.open));
+    return;
+  }
+
+  el.innerHTML = `<div class="sectionlabel">Bereiche</div>` + gebaeude().map(g => {
+    const col = g.probleme ? "var(--red)" : (g.faellig || g.offen) ? "var(--amber)" : "var(--signal)";
+    const bg  = g.probleme ? "var(--red-bg)" : (g.faellig || g.offen) ? "var(--amber-bg)" : "var(--signal-bg)";
+    const tags = [];
+    if(g.probleme) tags.push(`<span class="tag bad">${g.probleme} ${g.probleme===1?"Einrichtung":"Einrichtungen"} kritisch</span>`);
+    if(g.faellig)  tags.push(`<span class="tag warn">${g.faellig}× Prüfung fällig</span>`);
+    if(g.bestellen)tags.push(`<span class="tag">${g.bestellen} zu bestellen</span>`);
+    if(!tags.length) tags.push(`<span class="tag ok">Alles geprüft</span>`);
+    return `<button class="card boxcard" data-geb="${esc(g.name)}">
+      <div class="gebtile" style="border-color:${col};background:${bg};color:${col}">
+        <div><b>${g.boxes.length}</b></div>
+      </div>
+      <div class="meta">
+        <h3>${esc(g.name)}</h3>
+        <div class="sub">${g.boxes.length} ${g.boxes.length===1?"Einrichtung":"Einrichtungen"}</div>
+        <div class="tags">${tags.join("")}</div>
+      </div>
+      <svg class="chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 5l7 7-7 7"/></svg>
+    </button>`;
+  }).join("");
+  el.querySelectorAll("[data-geb]").forEach(x => x.onclick = () => openGeb(x.dataset.geb));
+}
+function openGeb(name){ curGeb = name; boxQuery = ""; go("boxes"); }
+
+/* =========================================================
+   VIEW 1 — Einrichtungen eines Gebäudes
+   ========================================================= */
+function renderBoxes(){
+  const liste = state.boxes.filter(b => (b.ort||"Ohne Gebäude") === curGeb);
+  if(!liste.length){ curGeb = null; return go("gebs"); }
+
+  $("#topEyebrow").textContent = "Gebäude";
+  $("#topTitle").textContent = curGeb;
+  $("#backBtn").hidden = false;
+
+  const bestellen = liste.reduce((n,b)=>n+boxStats(b).bestellen,0);
+  const faellig = liste.filter(b=>{const d=nextCheck(b);return !d||new Date(d)<new Date();}).length;
+
+  $("#boxesWrap").innerHTML = `
+    <div class="banner" style="margin-bottom:14px">
+      <div style="flex:1">
+        <b>${liste.length} ${liste.length===1?"Einrichtung":"Einrichtungen"}</b> ·
+        ${faellig?`${faellig} zur Prüfung fällig`:"alle Prüfungen aktuell"}${bestellen?` · ${bestellen} Artikel nachzubestellen`:""}
+      </div>
+    </div>
+    ${liste.length > 4 ? `<div class="search">
+      <svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="boxSearch" type="search" inputmode="search" autocomplete="off"
+             placeholder="In diesem Gebäude suchen" value="${esc(boxQuery)}">
+      <button id="boxClear" aria-label="Suche löschen" style="display:${boxQuery?"block":"none"}">×</button>
+    </div>` : ""}
+    <div id="boxList"></div>
+    <p class="note" style="margin-top:18px">Die Inhalte stammen aus dem WERO-Inhaltsverzeichnis vom 11.08.2026. REF-Nummern und Sollmengen lassen sich je Einrichtung anpassen und werden so in die Bestellung übernommen.</p>`;
+
+  const inp = $("#boxSearch");
+  if(inp){
+    const cl = $("#boxClear");
+    inp.oninput = () => { boxQuery = inp.value; cl.style.display = boxQuery ? "block" : "none"; renderBoxList(); };
+    cl.onclick = () => { boxQuery = ""; inp.value = ""; cl.style.display = "none"; inp.focus(); renderBoxList(); };
+  }
+  renderBoxList();
+
+  $("#actionInner").innerHTML = `
+    <button class="btn ghost" id="aOrderGeb" ${bestellen?"":"disabled"}>Bestellung${bestellen?` (${bestellen})`:""}</button>
+    <button class="btn primary" id="aNew"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Einrichtung</button>`;
+  $("#aNew").onclick = () => sheetBox(null, curGeb);
+  $("#aOrderGeb").onclick = () => openOrder({t:"geb", v:curGeb});
 }
 
 /** Nur die Liste neu zeichnen – das Suchfeld behält so den Fokus. */
 function renderBoxList(){
   const el = $("#boxList"); if(!el) return;
   const q = boxQuery.trim().toLowerCase();
-  const treffer = state.boxes.filter(b => !q ||
-    [b.name, b.ort, b.art, TEMPLATES[b.norm]?.label].join(" ").toLowerCase().includes(q));
+  const treffer = state.boxes
+    .filter(b => (b.ort||"Ohne Gebäude") === curGeb)
+    .filter(b => !q || [b.name, b.art, TEMPLATES[b.norm]?.label].join(" ").toLowerCase().includes(q));
 
   if(!treffer.length){
     el.innerHTML = `<div class="empty" style="padding:32px 20px">
-      <h3>Nichts gefunden</h3><p>Suche nach Standort, Gebäude oder Art der Einrichtung.</p></div>`;
+      <h3>Nichts gefunden</h3><p>Suche nach Standort oder Art der Einrichtung.</p></div>`;
     return;
   }
-  let html = "", letztes = null;
-  treffer.forEach(b => {
-    if(!q && b.ort !== letztes){ letztes = b.ort; html += `<div class="sectionlabel">${esc(b.ort||"Ohne Gebäude")}</div>`; }
-    html += boxCard(b, !!q);
-  });
-  el.innerHTML = html;
+  el.innerHTML = `<div class="sectionlabel">Einrichtungen</div>` + treffer.map(b => boxCard(b, false)).join("");
   el.querySelectorAll("[data-open]").forEach(x => x.onclick = () => openBox(x.dataset.open));
 }
 
@@ -542,7 +652,12 @@ function boxCard(b, mitGebaeude){
 /* =========================================================
    VIEW 2 — Kasten prüfen
    ========================================================= */
-function openBox(id){ curBox = id; filter = "alle"; go("box"); }
+function openBox(id){
+  curBox = id;
+  const b = state.boxes.find(x=>x.id===id);
+  if(b) curGeb = b.ort || "Ohne Gebäude";
+  filter = "alle"; go("box");
+}
 function renderBox(){
   const b = state.boxes.find(x=>x.id===curBox);
   if(!b) return go("boxes");
@@ -592,7 +707,7 @@ function renderBox(){
 
   // Events
   $("#bEdit").onclick    = () => sheetBox(b);
-  $("#bLog").onclick     = () => { orderScope = b.id; go("log"); };
+  $("#bLog").onclick     = () => go("log");
   $("#bAddItem").onclick = () => sheetItem(b);
   $("#bAllOk").onclick   = () => {
     b.items.forEach(it => { it.ist = it.soll; it.g = 1; });
@@ -610,7 +725,7 @@ function renderBox(){
       <svg viewBox="0 0 24 24"><path d="M4 4h2l2.7 12.4a2 2 0 002 1.6h7.7a2 2 0 002-1.6L22 8H6"/><circle cx="10" cy="21" r="1"/><circle cx="18" cy="21" r="1"/></svg>
       Bestellen${s.bestellen?` (${s.bestellen})`:""}</button>
     <button class="btn dark" id="aDone">Prüfung abschließen</button>`;
-  $("#aOrder").onclick = () => openOrder(b.id);
+  $("#aOrder").onclick = () => openOrder({t:"box", v:b.id});
   $("#aDone").onclick  = () => finishCheck(b);
 }
 function itemRow(it){
@@ -660,9 +775,11 @@ function finishCheck(b){
 /* =========================================================
    VIEW 3 — Bestellung
    ========================================================= */
-function openOrder(boxId){
-  orderScope = boxId;
-  const boxes = boxId ? state.boxes.filter(b=>b.id===boxId) : state.boxes;
+function openOrder(scope){
+  orderScope = scope || {t:"all"};
+  const boxes = orderScope.t==="box" ? state.boxes.filter(b=>b.id===orderScope.v)
+              : orderScope.t==="geb" ? state.boxes.filter(b=>(b.ort||"Ohne Gebäude")===orderScope.v)
+              : state.boxes;
   const map = new Map();
   boxes.forEach(b => b.items.forEach(it => {
     const q = need(it); if(!q) return;
@@ -677,7 +794,8 @@ function openOrder(boxId){
 }
 function renderOrder(){
   $("#topEyebrow").textContent = "Nachbestellung";
-  $("#topTitle").textContent = orderScope ? (state.boxes.find(b=>b.id===orderScope)?.name||"Bestellung") : "Alle Kästen";
+  $("#topTitle").textContent = orderScope.t==="box" ? (state.boxes.find(b=>b.id===orderScope.v)?.name||"Bestellung")
+                             : orderScope.t==="geb" ? orderScope.v : "Alle Gebäude";
   $("#backBtn").hidden = false;
 
   if(!orderData.length){
@@ -697,7 +815,7 @@ function renderOrder(){
         <div class="meta">
           <h4>${esc(o.n)}</h4>
           <div class="art">${esc(o.a||"ohne Art.-Nr.")}</div>
-          <div style="font-size:12.5px;color:var(--muted);margin-top:2px">${esc([...o.gruende].join(", "))}${orderScope?"":` · ${esc(o.boxes.join(", "))}`}</div>
+          <div style="font-size:12.5px;color:var(--muted);margin-top:2px">${esc([...o.gruende].join(", "))}${orderScope.t==="box"?"":` · ${esc(o.boxes.join(", "))}`}</div>
         </div>
         <input class="qty num" type="number" inputmode="numeric" min="1" max="999" value="${o.q}" data-q="${i}" aria-label="Menge">
       </div>`).join("")}</div>
@@ -722,12 +840,13 @@ function renderOrder(){
   };
 }
 function orderSubject(){
-  const scope = orderScope ? (state.boxes.find(b=>b.id===orderScope)?.name||"") : "Sammelbestellung";
+  const scope = orderScope.t==="box" ? (state.boxes.find(b=>b.id===orderScope.v)?.name||"")
+              : orderScope.t==="geb" ? orderScope.v : "Sammelbestellung";
   return `Bestellung Verbandmaterial – ${scope} – ${fmtDate(todayISO())}`;
 }
 function orderBody(){
   const sel = orderData.filter(o=>o.on);
-  const b = orderScope ? state.boxes.find(x=>x.id===orderScope) : null;
+  const b = orderScope.t==="box" ? state.boxes.find(x=>x.id===orderScope.v) : null;
   const L = [];
   L.push("Guten Tag,");
   L.push("");
@@ -739,7 +858,9 @@ function orderBody(){
   });
   L.push("");
   L.push("— — —");
-  L.push(b ? `Standort: ${b.name}${b.ort?`, ${b.ort}`:""}` : `Umfang:   ${state.boxes.length} Einrichtungen (Sammelbestellung)`);
+  if(b) L.push(`Standort: ${b.name}${b.ort?`, ${b.ort}`:""}`);
+  else if(orderScope.t==="geb") L.push(`Gebäude:  ${orderScope.v} (Sammelbestellung)`);
+  else L.push(`Umfang:   ${state.boxes.length} Einrichtungen, alle Gebäude`);
   if(b) L.push(`Einricht.: ${b.art || TEMPLATES[b.norm]?.label || "individuell"}`);
   L.push(`Geprüft:  ${fmtDate(todayISO())}${state.settings.pruefer?` von ${state.settings.pruefer}`:""}`);
   L.push("");
@@ -752,7 +873,7 @@ function orderBody(){
    VIEW 4 — Protokoll
    ========================================================= */
 function renderLog(){
-  const b = state.boxes.find(x=>x.id===orderScope) || state.boxes.find(x=>x.id===curBox);
+  const b = state.boxes.find(x=>x.id===curBox);
   $("#topEyebrow").textContent = "Prüfprotokoll";
   $("#topTitle").textContent = b ? b.name : "Protokoll";
   $("#backBtn").hidden = false;
@@ -781,7 +902,7 @@ function openSheet(html){ $("#sheetBody").innerHTML = `<div class="grabber"></di
 function closeSheet(){ sheet.close(); }
 sheet.addEventListener("click", e => { if(e.target === sheet) closeSheet(); });
 
-function sheetBox(b){
+function sheetBox(b, vorgabeOrt){
   const isNew = !b;
   openSheet(`
     <h2>${isNew?"Einrichtung anlegen":"Einrichtung bearbeiten"}</h2>
@@ -789,7 +910,7 @@ function sheetBox(b){
     <div class="field"><label for="fName">Standort</label>
       <input id="fName" placeholder="z. B. Leitzentrale" value="${esc(b?.name||"")}"></div>
     <div class="field"><label for="fOrt">Gebäude / Objekt</label>
-      <input id="fOrt" placeholder="z. B. O.v.G. Str. 25" value="${esc(b?.ort||"")}" list="gebList">
+      <input id="fOrt" placeholder="z. B. O.v.G. Str. 25" value="${esc(b?.ort||vorgabeOrt||"")}" list="gebList">
       <datalist id="gebList">${[...new Set(state.boxes.map(x=>x.ort).filter(Boolean))].map(g=>`<option value="${esc(g)}">`).join("")}</datalist></div>
     <div class="field"><label for="fArt">Art der Einrichtung</label>
       <input id="fArt" placeholder="z. B. Koffer Werotop 350" value="${esc(b?.art||"")}"></div>
@@ -814,7 +935,7 @@ function sheetBox(b){
         letztePruefung:null, letzterPruefer:"", log:[],
         items: TEMPLATES[norm].items.map(r=>({ id:uid(), a:r[0], n:r[1], soll:r[2], ist:0, mhd:"", x:r[3]?1:0, g:0 }))
       });
-      save(); closeSheet(); renderBoxes(); toast("Einrichtung angelegt");
+      save(); closeSheet(); curGeb = $("#fOrt").value.trim() || "Ohne Gebäude"; go("boxes"); toast("Einrichtung angelegt");
     } else {
       b.name = name; b.ort = $("#fOrt").value.trim(); b.art = $("#fArt").value.trim(); b.intervall = intervall;
       save(); closeSheet(); renderBox(); toast("Gespeichert");
@@ -824,7 +945,7 @@ function sheetBox(b){
   if(del) del.onclick = () => {
     if(!confirm(`„${b.name}“ mit allen Prüfungen löschen?`)) return;
     state.boxes = state.boxes.filter(x=>x.id!==b.id);
-    save(); closeSheet(); go("boxes"); toast("Einrichtung gelöscht");
+    save(); closeSheet(); go(state.boxes.some(x=>(x.ort||"Ohne Gebäude")===curGeb)?"boxes":"gebs"); toast("Einrichtung gelöscht");
   };
 }
 
@@ -886,7 +1007,7 @@ function sheetSettings(){
   };
   $("#sSeed").onclick = () => {
     const n = seedStandorte();
-    closeSheet(); go("boxes");
+    closeSheet(); go("gebs");
     toast(n ? `${n} Einrichtungen ergänzt` : "Alle Standorte sind bereits angelegt");
   };
   $("#sExport").onclick = () => {
@@ -909,7 +1030,7 @@ function sheetSettings(){
           if(!Array.isArray(p.boxes)) throw 0;
           if(!confirm("Backup einspielen? Die aktuellen Daten auf diesem Gerät werden ersetzt.")) return;
           state = Object.assign(structuredClone(DEF), p, { settings:Object.assign({},DEF.settings,p.settings||{}) });
-          save(); closeSheet(); go("boxes"); toast("Backup eingespielt");
+          save(); closeSheet(); go("gebs"); toast("Backup eingespielt");
         }catch(e){ toast("Datei nicht lesbar – bitte Backup-Datei wählen"); }
       };
       r.readAsText(f);
@@ -924,13 +1045,14 @@ function sheetSettings(){
 function go(v){ view = v; render(); window.scrollTo({top:0}); }
 function back(){
   if(view==="box") go("boxes");
-  else if(view==="order") go(orderScope?"box":"boxes");
+  else if(view==="order") go(orderScope.t==="box" ? "box" : orderScope.t==="geb" ? "boxes" : "gebs");
   else if(view==="log") go("box");
-  else go("boxes");
+  else if(view==="boxes") go("gebs");
+  else go("gebs");
 }
 function render(){
   document.querySelectorAll(".view").forEach(s => s.classList.toggle("active", s.id === "view-"+view));
-  ({ boxes:renderBoxes, box:renderBox, order:renderOrder, log:renderLog })[view]();
+  ({ gebs:renderGebs, boxes:renderBoxes, box:renderBox, order:renderOrder, log:renderLog })[view]();
 }
 $("#backBtn").onclick = back;
 $("#settingsBtn").onclick = sheetSettings;

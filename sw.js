@@ -1,6 +1,6 @@
 /* Verbandskasten-Kontrolle — Service Worker
    Bei jeder Code-Änderung CACHE hochzählen, damit Geräte die neue Version laden. */
-const CACHE = "vk-v2";
+const CACHE = "vk-v3";
 const ASSETS = [
   "./",
   "./index.html",
